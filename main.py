@@ -1,8 +1,8 @@
-import time
 import cv2
 import onnxruntime as ort
 import numpy as np
 import RPi.GPIO as ti_gpio
+ti_gpio.cleanup()
 
 print('''
             __      _         
