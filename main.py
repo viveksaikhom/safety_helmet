@@ -33,7 +33,10 @@ ti_gpio.setup(GREEN_PIN, ti_gpio.OUT)
 ti_gpio.setup(BLUE_PIN, ti_gpio.OUT)
 
 model_path = '/opt/model_zoo/20241208-173443_yolox_nano_lite_onnxrt_AM62A/model/model.onnx'
-session = ort.InferenceSession(model_path)
+
+# Explicitly setting the providers to resolve the ValueError
+providers = ['TIDLExecutionProvider', 'TIDLCompilationProvider', 'CPUExecutionProvider']
+session = ort.InferenceSession(model_path, providers=providers)
 
 input_name = session.get_inputs()[0].name
 output_name = session.get_outputs()[0].name
