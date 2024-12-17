@@ -1,8 +1,7 @@
 import cv2
 import onnxruntime as ort
 import numpy as np
-import RPi.GPIO as ti_gpio
-ti_gpio.cleanup()
+import time
 
 print('''
             __      _         
@@ -17,91 +16,96 @@ __     ______           |___/
    \_/  |____/                
 ''')
 
-print("Note:\nPIN 16: RED, PIN 18:GREEN, PIN 22:BLUE")
 user = input("Should we start? (y/n): ")
 if user == "y":
     print('Starting...')
 else:
     exit()
 
-ti_gpio.setmode(ti_gpio.BOARD)
-RED_PIN = 16
-GREEN_PIN = 18
-BLUE_PIN = 22
-ti_gpio.setup(RED_PIN, ti_gpio.OUT)
-ti_gpio.setup(GREEN_PIN, ti_gpio.OUT)
-ti_gpio.setup(BLUE_PIN, ti_gpio.OUT)
+tidl_providers = [
+    (
+        "TIDLExecutionProvider",
+        {
+            "tidl_network_path": "/opt/model_zoo/20241208-173443_yolox_nano_lite_onnxrt_AM62A/artifacts/detslabels_tidl_net.bin",
+            # Path to net.bin
+            "tidl_input_output_path": "/opt/model_zoo/20241208-173443_yolox_nano_lite_onnxrt_AM62A/artifacts/detslabels_tidl_io_1.bin",
+            # Path to io.bin
+            "tidl_delegate_path": "/opt/ti/tidl/libs/libtidl_delegate.so",
+        },
+    )
+]
 
-model_path = '/opt/model_zoo/20241208-173443_yolox_nano_lite_onnxrt_AM62A/model/model.onnx'
-
-providers = ['TIDLExecutionProvider', 'TIDLCompilationProvider', 'CPUExecutionProvider']
-session = ort.InferenceSession(model_path, providers=providers)
+onnx_model_path = "/opt/model_zoo/20241208-173443_yolox_nano_lite_onnxrt_AM62A/model/model.onnx"
+session = ort.InferenceSession(onnx_model_path, providers=tidl_providers)
 
 input_name = session.get_inputs()[0].name
 output_name = session.get_outputs()[0].name
 
+
+# Preprocess the input image
+def preprocess_image(image, input_size=(416, 416)):
+    resized_image = cv2.resize(image, input_size)
+    normalized_image = resized_image / 255.0
+    input_tensor = np.transpose(normalized_image, (2, 0, 1)).astype(
+        'float32')
+    return np.expand_dims(input_tensor, axis=0)
+
+
+def postprocess(output, conf_threshold=0.5):
+    boxes, scores, labels = output
+    mask = scores >= conf_threshold
+    boxes = boxes[mask]
+    scores = scores[mask]
+    labels = labels[mask]
+
+    class_names = ["without_helmet", "with_helmet"]
+
+    detections = []
+    for i in range(len(boxes)):
+        class_id = int(labels[i])
+        confidence = scores[i]
+        label = class_names[class_id]
+        detections.append(f"{label}: {confidence:.2f}")
+        print(f"Detected {label} with confidence {confidence:.2f}")
+
+    return detections
+
+
 cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
+if not cap.isOpened():
+    print("Error: Could not open camera.")
+    exit()
 
-def preprocess_image(image, input_shape):
-    image_resized = cv2.resize(image, (input_shape[2], input_shape[3]))
-    image_normalized = image_resized.astype(np.float32) / 255.0
-    image_transposed = np.transpose(image_normalized, (2, 0, 1))
-    image_batch = np.expand_dims(image_transposed, axis=0)
-    return image_batch
-
-
-def set_led_color(color):
-    if color == "green":
-        ti_gpio.output(RED_PIN, ti_gpio.LOW)
-        ti_gpio.output(GREEN_PIN, ti_gpio.HIGH)
-        ti_gpio.output(BLUE_PIN, ti_gpio.LOW)
-    elif color == "blue":
-        ti_gpio.output(RED_PIN, ti_gpio.LOW)
-        ti_gpio.output(GREEN_PIN, ti_gpio.LOW)
-        ti_gpio.output(BLUE_PIN, ti_gpio.HIGH)
-    elif color == "red":
-        ti_gpio.output(RED_PIN, ti_gpio.HIGH)
-        ti_gpio.output(GREEN_PIN, ti_gpio.LOW)
-        ti_gpio.output(BLUE_PIN, ti_gpio.LOW)
-
+last_time = time.time()
 
 while True:
     ret, frame = cap.read()
-
-    # If frame was captured successfully
     if not ret:
-        print("Failed to capture image")
+        print("Error: Failed to capture image.")
         break
 
-    input_data = preprocess_image(frame, session.get_inputs()[0].shape)
+    input_tensor = preprocess_image(frame)
+    outputs = session.run([output_name], {input_name: input_tensor})
 
-    outputs = session.run([output_name], {input_name: input_data})
+    # Postprocess the output
+    detections = postprocess(outputs[0])
 
-    boxes = outputs[0]
+    # Print detection results every second
+    current_time = time.time()
+    if current_time - last_time >= 1:
+        print(f"\nDetection results at {current_time:.2f} seconds:")
+        for detection in detections:
+            print(detection)
+        last_time = current_time
 
-    label = "No object"
+    for i in range(len(detections)):
+        cv2.putText(frame, detections[i], (10, (i + 1) * 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    if boxes[0][5] == "with helmet":
-        label = "With Helmet"
-        set_led_color("green")
-    elif boxes[0][5] == "without_helmet":
-        label = "Without Helmet"
-        set_led_color("red")
-
-    cv2.rectangle(frame, (int(boxes[0][0]), int(boxes[0][1])), (int(boxes[0][2]), int(boxes[0][3])), (0, 255, 0), 2)
-    cv2.putText(frame, label, (int(boxes[0][0]), int(boxes[0][1] - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-
-    if label == "With Helmet":
-        print("Helmet detected")
-
-    cv2.imshow('Helmet Detection', frame)
+    cv2.imshow("YOLOX Detection - Press 'q' to quit", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
 cap.release()
 cv2.destroyAllWindows()
-ti_gpio.cleanup()
