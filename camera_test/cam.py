@@ -1,6 +1,6 @@
 import cv2
 
-camera = cv2.VideoCapture(0)  # USB camera 0
+camera = cv2.VideoCapture(0)  # USB Camera 0
 
 if not camera.isOpened():
     print("Error: Unable to access the camera.")

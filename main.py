@@ -27,9 +27,7 @@ tidl_providers = [
         "TIDLExecutionProvider",
         {
             "tidl_network_path": "/opt/model_zoo/20241208-173443_yolox_nano_lite_onnxrt_AM62A/artifacts/detslabels_tidl_net.bin",
-            # Path to net.bin
             "tidl_input_output_path": "/opt/model_zoo/20241208-173443_yolox_nano_lite_onnxrt_AM62A/artifacts/detslabels_tidl_io_1.bin",
-            # Path to io.bin
             "tidl_delegate_path": "/opt/ti/tidl/libs/libtidl_delegate.so",
         },
     )
@@ -41,15 +39,11 @@ session = ort.InferenceSession(onnx_model_path, providers=tidl_providers)
 input_name = session.get_inputs()[0].name
 output_name = session.get_outputs()[0].name
 
-
-# Preprocess the input image
 def preprocess_image(image, input_size=(416, 416)):
     resized_image = cv2.resize(image, input_size)
     normalized_image = resized_image / 255.0
-    input_tensor = np.transpose(normalized_image, (2, 0, 1)).astype(
-        'float32')
+    input_tensor = np.transpose(normalized_image, (2, 0, 1)).astype('float32')
     return np.expand_dims(input_tensor, axis=0)
-
 
 def postprocess(output, conf_threshold=0.5):
     boxes, scores, labels = output
@@ -70,7 +64,6 @@ def postprocess(output, conf_threshold=0.5):
 
     return detections
 
-
 cap = cv2.VideoCapture(0)
 
 if not cap.isOpened():
@@ -88,10 +81,8 @@ while True:
     input_tensor = preprocess_image(frame)
     outputs = session.run([output_name], {input_name: input_tensor})
 
-    # Postprocess the output
     detections = postprocess(outputs[0])
 
-    # Print detection results every second
     current_time = time.time()
     if current_time - last_time >= 1:
         print(f"\nDetection results at {current_time:.2f} seconds:")
